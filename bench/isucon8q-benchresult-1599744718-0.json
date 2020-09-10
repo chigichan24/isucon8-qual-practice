@@ -1,0 +1,1 @@
+{"job_id":"0","ip_addrs":"","pass":false,"score":0,"message":"/initialize へのリクエストに失敗しました。Get http:///initialize: http: no Host in request URL","error":null,"log":null,"load_level":0,"start_time":"2020-09-10T22:31:58.520365961+09:00","end_time":"2020-09-10T22:31:58.588232396+09:00"}

@@ -1,0 +1,3 @@
+[  info ] [isu8q-bench] 2020/09/10 23:39:05.624748 dataset.go:300: datapath ./data
+[  info ] [isu8q-bench] 2020/09/10 23:39:05.838343 bench.go:590: Remotes []
+[  info ] [isu8q-bench] 2020/09/10 23:39:05.838450 bench.go:437: State.Init()

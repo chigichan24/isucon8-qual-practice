@@ -1,0 +1,6 @@
+[  info ] [isu8q-bench] 2020/09/10 23:01:28.734426 dataset.go:300: datapath ./data
+[  info ] [isu8q-bench] 2020/09/10 23:01:28.975491 bench.go:590: Remotes []
+[  info ] [isu8q-bench] 2020/09/10 23:01:28.975584 bench.go:437: State.Init()
+[  info ] [isu8q-bench] 2020/09/10 23:01:28.975626 bench.go:583: listen tcp :16060: bind: address already in use
+[  info ] [isu8q-bench] 2020/09/10 23:01:29.100039 bench.go:439: State.Init() Done
+[  info ] [isu8q-bench] 2020/09/10 23:01:29.100107 bench.go:441: requestInitialize()
