@@ -455,10 +455,9 @@ func main() {
 		})
 	}, fillinUser)
 	e.GET("/initialize", func(c echo.Context) error {
-		cmd := exec.Command("../../db/init.sh")
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
+		cmd := exec.Command("curl", "http://192.168.10.1/initialize")
 		err := cmd.Run()
+
 		if err != nil {
 			return nil
 		}
