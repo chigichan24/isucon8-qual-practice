@@ -13,6 +13,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -376,6 +377,82 @@ func getEvent(eventID, loginUserID int64) (*Event, error) {
 	return &event, nil
 }
 
+func getEventWithoutSheetDetail(eventID) (*Event, error) {
+	var event Event
+	if err := db.QueryRow("SELECT * FROM events WHERE id = ?", eventID).Scan(&event.ID, &event.Title, &event.PublicFg, &event.ClosedFg, &event.Price); err != nil {
+		return nil, err
+	}
+	event.Sheets = map[string]*Sheets{
+		"S": &Sheets{},
+		"A": &Sheets{},
+		"B": &Sheets{},
+		"C": &Sheets{},
+	}
+
+	event.Sheets["S"].Price = event.Price + 5000
+	event.Sheets["A"].Price = event.Price + 3000
+	event.Sheets["B"].Price = event.Price + 1000
+	event.Sheets["C"].Price = event.Price + 0
+	event.Total = 1000
+	event.Sheets["S"].Total = 50
+	event.Sheets["A"].Total = 150
+	event.Sheets["B"].Total = 300
+	event.Sheets["C"].Total = 500
+
+	rows, err := db.Query(`
+	SELECT * FROM reservations
+	WHERE event_id = ? AND canceled_at IS NULL
+	GROUP BY event_id, sheet_id
+	HAVING reserved_at = MIN(reserved_at)`, event.ID)
+	defer rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var reservation Reservation
+		var rID, rEventID, rSheetID, rUserID sql.NullInt64
+		if err := rows.Scan(&rID, &rEventID, &rSheetID, &rUserID, &reservation.ReservedAt, &reservation.CanceledAt); err != nil {
+			return nil, err
+		}
+		if rID.Valid {
+			reservation.ID = rID.Int64
+		}
+		if rEventID.Valid {
+			reservation.EventID = rEventID.Int64
+		}
+		if rSheetID.Valid {
+			reservation.SheetID = rSheetID.Int64
+		}
+		if rUserID.Valid {
+			reservation.UserID = rUserID.Int64
+		}
+		if reservation.ReservedAt == nil {
+			event.Remains++
+			event.Sheets[getRrankFromSheetId(rSheetID.Int64)].Remains++
+		}
+	}
+	event.Sheets["S"].Detail = nil
+	event.Sheets["A"].Detail = nil
+	event.Sheets["B"].Detail = nil
+	event.Sheets["C"].Detail = nil
+
+	return &event, nil
+}
+
+func getRrankFromSheetId(id int64) string {
+	if id <= 50 {
+		return "S"
+	}
+	if id <= 200 {
+		return "A"
+	}
+	if id <= 500 {
+		return "B"
+	}
+	return "C"
+}
+
 func sanitizeEvent(e *Event) *Event {
 	sanitized := *e
 	sanitized.Price = 0
@@ -431,6 +508,7 @@ func main() {
 		log.Fatal(err)
 	}
 
+	runtime.SetBlockProfileRate(1)
 	go func() {
 		log.Println(http.ListenAndServe("0.0.0.0:9999", nil))
 	}()
@@ -584,12 +662,9 @@ func main() {
 				return err
 			}
 			// <O>_<O>
-			event, err := getEvent(eventID, -1)
+			event, err := getEventWithoutSheetDetail(eventID)
 			if err != nil {
 				return err
-			}
-			for k := range event.Sheets {
-				event.Sheets[k].Detail = nil
 			}
 			recentEvents = append(recentEvents, event)
 		}
@@ -660,7 +735,6 @@ func main() {
 			loginUserID = user.ID
 		}
 
-		// <O>_<O>
 		event, err := getEvent(eventID, loginUserID)
 		if err != nil {
 			if err == sql.ErrNoRows {
