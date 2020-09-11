@@ -298,6 +298,14 @@ func getEvents(all bool) ([]*Event, error) {
 	return getEventsFix(all)
 }
 
+func getEventSimple(eventID int64) (*Event, error) {
+	var event Event
+	if err := db.QueryRow("SELECT * FROM events WHERE id = ?", eventID).Scan(&event.ID, &event.Title, &event.PublicFg, &event.ClosedFg, &event.Price); err != nil {
+		return nil, err
+	}
+	return &event, nil
+}
+
 func getEvent(eventID, loginUserID int64) (*Event, error) {
 	var event Event
 	if err := db.QueryRow("SELECT * FROM events WHERE id = ?", eventID).Scan(&event.ID, &event.Title, &event.PublicFg, &event.ClosedFg, &event.Price); err != nil {
@@ -675,7 +683,7 @@ func main() {
 			return err
 		}
 
-		event, err := getEvent(eventID, user.ID)
+		event, err := getEventSimple(eventID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return resError(c, "invalid_event", 404)
@@ -744,7 +752,7 @@ func main() {
 			return err
 		}
 
-		event, err := getEvent(eventID, user.ID)
+		event, err := getEventSimple(eventID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return resError(c, "invalid_event", 404)
@@ -939,6 +947,7 @@ func main() {
 			return err
 		}
 
+		// TODO: remove this
 		e, err := getEvent(eventID, -1)
 		if err != nil {
 			return err
@@ -952,6 +961,7 @@ func main() {
 			return resError(c, "not_found", 404)
 		}
 
+		// TODO: remove this
 		event, err := getEvent(eventID, -1)
 		if err != nil {
 			return err
