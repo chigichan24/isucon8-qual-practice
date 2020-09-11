@@ -534,6 +534,7 @@ func main() {
 		defer rows.Close()
 
 		var recentReservations []Reservation
+		rankPrice := map[string]int64{"S": 5000, "A": 3000, "B": 1000, "C": 0}
 		for rows.Next() {
 			var reservation Reservation
 			var sheet Sheet
@@ -541,11 +542,12 @@ func main() {
 				return err
 			}
 
-			event, err := getEvent(reservation.EventID, -1)
+			event, err := getEventSimple(reservation.EventID)
 			if err != nil {
 				return err
 			}
-			price := event.Sheets[sheet.Rank].Price
+
+			price := rankPrice[sheet.Rank] + event.Price
 			event.Sheets = nil
 			event.Total = 0
 			event.Remains = 0
@@ -581,6 +583,7 @@ func main() {
 			if err := rows.Scan(&eventID); err != nil {
 				return err
 			}
+			// <O>_<O>
 			event, err := getEvent(eventID, -1)
 			if err != nil {
 				return err
@@ -657,6 +660,7 @@ func main() {
 			loginUserID = user.ID
 		}
 
+		// <O>_<O>
 		event, err := getEvent(eventID, loginUserID)
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -943,16 +947,15 @@ func main() {
 			tx.Rollback()
 			return err
 		}
+
+		event.PublicFg = params.Public
+		event.ClosedFg = params.Closed
+
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 
-		// TODO: remove this
-		e, err := getEvent(eventID, -1)
-		if err != nil {
-			return err
-		}
-		c.JSON(200, e)
+		c.JSON(200, event)
 		return nil
 	}, adminLoginRequired)
 	e.GET("/admin/api/reports/events/:id/sales", func(c echo.Context) error {
@@ -961,13 +964,9 @@ func main() {
 			return resError(c, "not_found", 404)
 		}
 
-		// TODO: remove this
-		event, err := getEvent(eventID, -1)
-		if err != nil {
-			return err
-		}
+		event, err := getEventSimple(eventID)
 
-		rows, err := db.Query("SELECT r.*, s.rank AS sheet_rank, s.num AS sheet_num, s.price AS sheet_price, e.price AS event_price FROM reservations r INNER JOIN sheets s ON s.id = r.sheet_id INNER JOIN events e ON e.id = r.event_id WHERE r.event_id = ? ORDER BY reserved_at ASC", event.ID)
+		rows, err := db.Query("SELECT r.*, s.rank AS sheet_rank, s.num AS sheet_num, s.price AS sheet_price, e.price AS event_price FROM reservations r INNER JOIN sheets s ON s.id = r.sheet_id INNER JOIN events e ON e.id = r.event_id WHERE r.event_id = ? ORDER BY reserved_at ASC", eventID)
 		if err != nil {
 			return err
 		}
