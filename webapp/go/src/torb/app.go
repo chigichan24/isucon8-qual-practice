@@ -186,41 +186,116 @@ func getLoginAdministrator(c echo.Context) (*Administrator, error) {
 	return &administrator, err
 }
 
-func getEvents(all bool) ([]*Event, error) {
+func getEventsFix(all bool) ([]*Event, error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Commit()
 
-	rows, err := tx.Query("SELECT * FROM events ORDER BY id ASC")
+	var rows *sql.Rows
+	if all {
+		rows, err = tx.Query(`
+			SELECT id, title, public_fg, closed_fg, el.price as event_price, capacity.price as seat_price, rank, capacity, IF(ISNULL(sold), 0, sold) as sold
+			FROM ((SELECT * FROM events) as el,
+				(SELECT rank, COUNT(*) as capacity, price FROM sheets GROUP BY rank) as capacity)
+			LEFT OUTER JOIN
+				(SELECT event_id as id, rank, COUNT(rank) as sold
+					FROM (
+						SELECT *
+						FROM reservations
+						WHERE canceled_at IS NULL
+					) as r
+					INNER JOIN (
+						SELECT *
+						FROM events
+					) as e ON r.event_id = e.id
+					INNER JOIN sheets ON sheet_id = sheets.id
+					GROUP BY event_id, rank
+				) as reserved_seats_table
+			USING (id, rank)
+			ORDER BY id, rank
+		`)
+	} else {
+		// add WHERE public_fg = 1 two times
+		rows, err = tx.Query(`
+			SELECT id, title, public_fg, closed_fg, el.price as event_price, capacity.price as seat_price, rank, capacity, IF(ISNULL(sold), 0, sold) as sold
+			FROM ((SELECT * FROM events WHERE public_fg = 1) as el,
+				(SELECT rank, COUNT(*) as capacity, price FROM sheets GROUP BY rank) as capacity)
+			LEFT OUTER JOIN
+				(SELECT event_id as id, rank, COUNT(rank) as sold
+					FROM (
+						SELECT *
+						FROM reservations
+						WHERE canceled_at IS NULL
+					) as r
+					INNER JOIN (
+						SELECT *
+						FROM events
+									WHERE public_fg = 1
+					) as e ON r.event_id = e.id
+					INNER JOIN sheets ON sheet_id = sheets.id
+					GROUP BY event_id, rank
+				) as reserved_seats_table
+			USING (id, rank)
+			ORDER BY id, rank
+		`)
+	}
 	if err != nil {
+		log.Fatal(err.Error())
+		tx.Rollback()
 		return nil, err
 	}
 	defer rows.Close()
 
 	var events []*Event
 	for rows.Next() {
-		var event Event
-		if err := rows.Scan(&event.ID, &event.Title, &event.PublicFg, &event.ClosedFg, &event.Price); err != nil {
+		var id, eventPrice, seatPrice int64
+		var title, rank string
+		var public, closed bool
+		var capacity, sold int
+		if err := rows.Scan(&id, &title, &public, &closed, &eventPrice, &seatPrice, &rank, &capacity, &sold); err != nil {
+			log.Fatal(err.Error())
 			return nil, err
 		}
-		if !all && !event.PublicFg {
-			continue
+
+		if rank == "A" {
+			// allocate an new element
+			var event Event
+			event.ID = id
+			event.Title = title
+			event.PublicFg = public
+			event.ClosedFg = closed
+			event.Price = eventPrice
+
+			// total seats
+			event.Total = 1000
+			event.Sheets = map[string]*Sheets{
+				"S": &Sheets{},
+				"A": &Sheets{},
+				"B": &Sheets{},
+				"C": &Sheets{},
+			}
+			events = append(events, &event)
 		}
-		events = append(events, &event)
-	}
-	for i, v := range events {
-		event, err := getEvent(v.ID, -1)
-		if err != nil {
-			return nil, err
+		e := events[len(events)-1]
+		e.Sheets[rank].Total = capacity
+		e.Sheets[rank].Remains = capacity - sold
+		e.Sheets[rank].Detail = nil
+		e.Sheets[rank].Price = seatPrice + eventPrice
+		if rank == "S" {
+			e.Remains = 0 +
+				e.Sheets["A"].Remains +
+				e.Sheets["B"].Remains +
+				e.Sheets["C"].Remains +
+				e.Sheets["S"].Remains
 		}
-		for k := range event.Sheets {
-			event.Sheets[k].Detail = nil
-		}
-		events[i] = event
 	}
 	return events, nil
+}
+
+func getEvents(all bool) ([]*Event, error) {
+	return getEventsFix(all)
 }
 
 func getEvent(eventID, loginUserID int64) (*Event, error) {
@@ -618,15 +693,16 @@ func main() {
 		var sheet Sheet
 		var reservationID int64
 		for {
-			if err := db.QueryRow("SELECT * FROM sheets WHERE id NOT IN (SELECT sheet_id FROM reservations WHERE event_id = ? AND canceled_at IS NULL FOR UPDATE) AND `rank` = ? ORDER BY RAND() LIMIT 1", event.ID, params.Rank).Scan(&sheet.ID, &sheet.Rank, &sheet.Num, &sheet.Price); err != nil {
-				if err == sql.ErrNoRows {
-					return resError(c, "sold_out", 409)
-				}
+			tx, err := db.Begin()
+			if err != nil {
 				return err
 			}
 
-			tx, err := db.Begin()
-			if err != nil {
+			if err := tx.QueryRow("SELECT * FROM sheets WHERE id NOT IN (SELECT sheet_id FROM reservations WHERE event_id = ? AND canceled_at IS NULL FOR UPDATE) AND `rank` = ? ORDER BY RAND() LIMIT 1", event.ID, params.Rank).Scan(&sheet.ID, &sheet.Rank, &sheet.Num, &sheet.Price); err != nil {
+				tx.Rollback()
+				if err == sql.ErrNoRows {
+					return resError(c, "sold_out", 409)
+				}
 				return err
 			}
 
@@ -882,7 +958,7 @@ func main() {
 			return err
 		}
 
-		rows, err := db.Query("SELECT r.*, s.rank AS sheet_rank, s.num AS sheet_num, s.price AS sheet_price, e.price AS event_price FROM reservations r INNER JOIN sheets s ON s.id = r.sheet_id INNER JOIN events e ON e.id = r.event_id WHERE r.event_id = ? ORDER BY reserved_at ASC FOR UPDATE", event.ID)
+		rows, err := db.Query("SELECT r.*, s.rank AS sheet_rank, s.num AS sheet_num, s.price AS sheet_price, e.price AS event_price FROM reservations r INNER JOIN sheets s ON s.id = r.sheet_id INNER JOIN events e ON e.id = r.event_id WHERE r.event_id = ? ORDER BY reserved_at ASC", event.ID)
 		if err != nil {
 			return err
 		}
@@ -912,7 +988,7 @@ func main() {
 		return renderReportCSV(c, reports)
 	}, adminLoginRequired)
 	e.GET("/admin/api/reports/sales", func(c echo.Context) error {
-		rows, err := db.Query("select r.*, s.rank as sheet_rank, s.num as sheet_num, s.price as sheet_price, e.id as event_id, e.price as event_price from reservations r inner join sheets s on s.id = r.sheet_id inner join events e on e.id = r.event_id order by reserved_at asc for update")
+		rows, err := db.Query("select r.*, s.rank as sheet_rank, s.num as sheet_num, s.price as sheet_price, e.id as event_id, e.price as event_price from reservations r inner join sheets s on s.id = r.sheet_id inner join events e on e.id = r.event_id order by reserved_at asc")
 		if err != nil {
 			return err
 		}
