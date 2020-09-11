@@ -149,6 +149,10 @@ func sessDeleteAdministratorID(c echo.Context) {
 	sess.Save(c.Request(), c.Response())
 }
 
+func sha256(s string) string {
+	return fmt.Sprintf("%x", crypto.sha256.Sum256([]byte(s)))
+}
+
 func loginRequired(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if _, err := getLoginUser(c); err != nil {
@@ -572,7 +576,7 @@ func main() {
 			return err
 		}
 
-		res, err := tx.Exec("INSERT INTO users (login_name, pass_hash, nickname) VALUES (?, SHA2(?, 256), ?)", params.LoginName, params.Password, params.Nickname)
+		res, err := tx.Exec("INSERT INTO users (login_name, pass_hash, nickname) VALUES (?, ?, ?)", params.LoginName, sha256(params.Password), params.Nickname)
 		if err != nil {
 			tx.Rollback()
 			return resError(c, "", 0)
@@ -695,11 +699,7 @@ func main() {
 			return err
 		}
 
-		var passHash string
-		if err := db.QueryRow("SELECT SHA2(?, 256)", params.Password).Scan(&passHash); err != nil {
-			return err
-		}
-		if user.PassHash != passHash {
+		if user.PassHash != sha256(params.Password) {
 			return resError(c, "authentication_failed", 401)
 		}
 
